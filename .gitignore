@@ -1,0 +1,8 @@
+__pycache__/
+build/
+dist/
+*.spec.bak
+test_music.wav
+test_out.wav
+test_out.flac
+SpectroStegoTest.spec
