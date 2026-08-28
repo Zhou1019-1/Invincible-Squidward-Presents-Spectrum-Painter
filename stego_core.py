@@ -45,6 +45,72 @@ def _load_font(font_size):
     return ImageFont.load_default()
 
 
+def region_geometry(sr, f_low, f_high, duration):
+    """计算绘制区域对应的像素网格：(width 列数, n_rows 频率行数)"""
+    total = int(sr * duration)
+    n_bins = N_FFT // 2 + 1
+    bin_low = int(np.floor(f_low / sr * N_FFT))
+    bin_high = min(int(np.ceil(f_high / sr * N_FFT)), n_bins - 1)
+    n_rows = bin_high - bin_low
+    width = max(8, total // HOP)
+    return width, n_rows
+
+
+def render_text_fit(text, target_w, target_h, color="white"):
+    """
+    按目标像素尺寸自动选择字号渲染文字（原生分辨率，不经过二次缩放，最清晰）。
+    返回 (target_h, target_w) 的 uint8 数组。
+    """
+    pad = 2
+    # 二分查找能放下的最大字号
+    lo, hi = 8, max(16, target_h * 2)
+    best = lo
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        font = _load_font(mid)
+        d = ImageDraw.Draw(Image.new("L", (8, 8), 0))
+        bbox = d.textbbox((0, 0), text, font=font)
+        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        if w <= target_w - pad * 2 and h <= target_h - pad * 2:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    font = _load_font(best)
+    d = ImageDraw.Draw(Image.new("L", (8, 8), 0))
+    bbox = d.textbbox((0, 0), text, font=font)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    img = Image.new("L", (target_w, target_h), 0)
+    d = ImageDraw.Draw(img)
+    d.text(((target_w - w) // 2 - bbox[0], (target_h - h) // 2 - bbox[1]),
+           text, font=font, fill=255)
+    return np.asarray(img, dtype=np.uint8)
+
+
+def load_stego_image(path, target_w, target_h, mode="fit", invert=False):
+    """
+    加载图片/Logo 并适配到目标像素网格。
+    mode: "fit" 保持比例居中（黑边=无声）/ "stretch" 拉伸填满
+    invert: 反色（适合深色 Logo）
+    取红色通道；透明 PNG 合成到黑底。
+    """
+    img = Image.open(path).convert("RGBA")
+    bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
+    img = Image.alpha_composite(bg, img).convert("RGB")
+    r = img.split()[0]  # 红色通道
+    if mode == "stretch":
+        r = r.resize((target_w, target_h), Image.BILINEAR)
+    else:
+        r.thumbnail((target_w, target_h), Image.LANCZOS)
+        canvas = Image.new("L", (target_w, target_h), 0)
+        canvas.paste(r, ((target_w - r.width) // 2, (target_h - r.height) // 2))
+        r = canvas
+    arr = np.asarray(r, dtype=np.uint8)
+    if invert:
+        arr = 255 - arr
+    return arr
+
+
 def render_text_image(text, font_size=64, color="white"):
     """
     将文字渲染为黑底图像，返回 HxW 的 uint8 数组（取红色通道值）。
@@ -71,18 +137,19 @@ def synthesize_ultrasound(img, sr, f_low, f_high, duration, progress_cb=None):
     顶部=高频，底部=低频。返回 float32 单声道数组，峰值归一化到 0.95。
     """
     total = int(sr * duration)
+    width, n_rows = region_geometry(sr, f_low, f_high, duration)
     n_bins = N_FFT // 2 + 1
     bin_low = int(np.floor(f_low / sr * N_FFT))
-    bin_high = int(np.ceil(f_high / sr * N_FFT))
-    bin_high = min(bin_high, n_bins - 1)
-    n_rows = bin_high - bin_low
+    bin_high = min(int(np.ceil(f_high / sr * N_FFT)), n_bins - 1)
     if n_rows < 2:
         raise ValueError("频率范围太窄，无法绘制图像")
-    width = max(8, total // HOP)
 
-    # 图像缩放到 (width, n_rows)，使每一行精确对应一个频点
-    pil = Image.fromarray(img).resize((width, n_rows), Image.BILINEAR)
-    amp = np.asarray(pil, dtype=np.float32).T / 255.0  # -> (width, n_rows)
+    # 图像尺寸与像素网格一致时直接使用（原生分辨率，最清晰），否则缩放
+    if img.shape == (n_rows, width):
+        amp = img.astype(np.float32).T / 255.0          # -> (width, n_rows)
+    else:
+        pil = Image.fromarray(img).resize((width, n_rows), Image.LANCZOS)
+        amp = np.asarray(pil, dtype=np.float32).T / 255.0
 
     # 频率映射：行 -> bin（顶部=高频）
     rows = np.arange(n_rows)

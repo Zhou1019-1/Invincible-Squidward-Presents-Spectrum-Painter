@@ -13,6 +13,7 @@ from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QIcon
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QLineEdit, QSpinBox, QComboBox, QSlider,
+    QCheckBox,
     QFileDialog, QMessageBox, QProgressBar, QGroupBox, QFormLayout,
 )
 
@@ -189,7 +190,7 @@ class SynthWorker(QThread):
             img = core.render_text_image(self.text, self.font_size)
             self.progress.emit(5, "渲染文字完成，开始超声编码...")
             hidden = core.synthesize_ultrasound(
-                img, self.sr, f_low, f_high, t1 - t0,
+                img, self.sr, f_low, f_high, dur,
                 progress_cb=lambda p, m: self.progress.emit(5 + int(p * 0.75), m))
             self.progress.emit(85, "混音...")
             mixed = core.mix_audio(self.music, hidden,
@@ -239,18 +240,43 @@ class MainWindow(QMainWindow):
 
         grp_text = QGroupBox("② 绘制内容")
         form = QFormLayout(grp_text)
+        self.cmb_type = QComboBox()
+        self.cmb_type.addItems(["文字", "图片 / Logo"])
+        self.cmb_type.currentIndexChanged.connect(self.on_type_changed)
+        form.addRow("类型:", self.cmb_type)
+
+        # 文字选项
+        self.text_opts = QWidget()
+        ft = QFormLayout(self.text_opts)
+        ft.setContentsMargins(0, 0, 0, 0)
         self.edt_text = QLineEdit("HELLO")
-        self.edt_text.textChanged.connect(self.update_text_preview)
-        self.spin_font = QSpinBox()
-        self.spin_font.setRange(16, 400)
-        self.spin_font.setValue(96)
-        self.spin_font.valueChanged.connect(self.update_text_preview)
+        self.edt_text.textChanged.connect(self.update_preview)
         self.cmb_color = QComboBox()
         self.cmb_color.addItems(["白色", "红色"])
-        self.cmb_color.currentIndexChanged.connect(self.update_text_preview)
-        form.addRow("文字:", self.edt_text)
-        form.addRow("字号:", self.spin_font)
-        form.addRow("颜色:", self.cmb_color)
+        self.cmb_color.currentIndexChanged.connect(self.update_preview)
+        ft.addRow("文字:", self.edt_text)
+        ft.addRow("颜色:", self.cmb_color)
+        form.addRow(self.text_opts)
+
+        # 图片选项
+        self.img_opts = QWidget()
+        fi = QFormLayout(self.img_opts)
+        fi.setContentsMargins(0, 0, 0, 0)
+        self.btn_img = QPushButton("选择图片...")
+        self.btn_img.clicked.connect(self.choose_image)
+        self.lbl_imgname = QLabel("未选择")
+        self.lbl_imgname.setWordWrap(True)
+        self.cmb_fit = QComboBox()
+        self.cmb_fit.addItems(["保持比例（推荐）", "拉伸填满"])
+        self.chk_invert = QCheckBox("反色（深色 Logo 勾选）")
+        fi.addRow(self.btn_img)
+        fi.addRow(self.lbl_imgname)
+        fi.addRow("填充:", self.cmb_fit)
+        fi.addRow(self.chk_invert)
+        self.img_opts.setVisible(False)
+        form.addRow(self.img_opts)
+
+        self.img_path = None
         self.lbl_preview = QLabel()
         self.lbl_preview.setFixedHeight(90)
         self.lbl_preview.setStyleSheet("background:#000; border:1px solid #333;")
@@ -307,7 +333,7 @@ class MainWindow(QMainWindow):
         self.canvas.regionSelected.connect(self.on_region_selected)
         lay.addWidget(self.canvas, 1)
 
-        self.update_text_preview()
+        self.update_preview()
 
     # ---------- 逻辑 ----------
     def open_audio(self):
@@ -354,18 +380,42 @@ class MainWindow(QMainWindow):
             f"时间: {t0:.2f}s – {t1:.2f}s  (时长 {t1 - t0:.2f}s)\n"
             f"频率: {f0:.1f} – {f1:.1f} kHz")
 
-    def update_text_preview(self):
-        text = self.edt_text.text() or " "
-        try:
-            img = core.render_text_image(text, self.spin_font.value())
-        except Exception:
-            return
-        color = self.cmb_color.currentText()
-        rgb = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
-        if color == "红色":
-            rgb[..., 0] = img
+    def on_type_changed(self, idx):
+        is_text = idx == 0
+        self.text_opts.setVisible(is_text)
+        self.img_opts.setVisible(not is_text)
+        self.update_preview()
+
+    def choose_image(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择图片", "",
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp);;所有文件 (*)")
+        if path:
+            self.img_path = path
+            self.lbl_imgname.setText(os.path.basename(path))
+            self.update_preview()
+
+    def update_preview(self):
+        if self.cmb_type.currentIndex() == 0:
+            text = self.edt_text.text() or " "
+            try:
+                img = core.render_text_image(text, 64)
+            except Exception:
+                return
+            rgb = np.zeros((img.shape[0], img.shape[1], 3), dtype=np.uint8)
+            if self.cmb_color.currentText() == "红色":
+                rgb[..., 0] = img
+            else:
+                rgb[...] = img[..., None]
         else:
-            rgb[...] = img[..., None]
+            if not self.img_path:
+                self.lbl_preview.clear()
+                return
+            try:
+                img = core.load_stego_image(self.img_path, 400, 80)
+            except Exception:
+                return
+            rgb = np.repeat(img[..., None], 3, axis=2)
         rgb = np.ascontiguousarray(rgb)
         h, w, _ = rgb.shape
         qimg = QImage(rgb.data, w, h, w * 3, QImage.Format_RGB888).copy()
@@ -380,13 +430,20 @@ class MainWindow(QMainWindow):
         if self.region is None:
             QMessageBox.warning(self, "提示", "请先在频谱图上框选绘制区域")
             return
-        if not self.edt_text.text().strip():
-            QMessageBox.warning(self, "提示", "请输入要绘制的文字")
-            return
+        if self.cmb_type.currentIndex() == 0:
+            if not self.edt_text.text().strip():
+                QMessageBox.warning(self, "提示", "请输入要绘制的文字")
+                return
+            source = ("text", self.edt_text.text())
+        else:
+            if not self.img_path:
+                QMessageBox.warning(self, "提示", "请先选择图片")
+                return
+            mode = "stretch" if self.cmb_fit.currentIndex() == 1 else "fit"
+            source = ("image", self.img_path, mode, self.chk_invert.isChecked())
         self.btn_synth.setEnabled(False)
         self.worker = SynthWorker(
-            self.music, self.sr, self.edt_text.text(),
-            self.spin_font.value(), self.region,
+            self.music, self.sr, source, self.region,
             self.slider_gain.value())
         self.worker.progress.connect(
             lambda p, m: (self.progress.setValue(p), self.lbl_status.setText(m)))

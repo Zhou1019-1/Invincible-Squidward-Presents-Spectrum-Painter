@@ -44,7 +44,8 @@
 
 - 🎵 WAV / FLAC / OGG / MP3 input, auto-resampled to 192 kHz
 - 🖱️ Drag-select any time × frequency region on the spectrogram
-- 🔤 Chinese & English text rendering with font size / color options and live preview
+- 🔤 Text rendered at native region resolution (auto-fit font size), crisp strokes
+- 🖼️ Image / Logo embedding (transparent PNG composited, fit / stretch / invert modes)
 - 🎚️ Hidden-signal gain slider (-50 to -20 dB)
 - 👁️ Spectrogram refreshes instantly after synthesis — what you see is what you get
 - 💾 Export 24-bit / 192 kHz WAV or FLAC
