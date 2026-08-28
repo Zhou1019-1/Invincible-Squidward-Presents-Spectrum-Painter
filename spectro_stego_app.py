@@ -177,18 +177,26 @@ class SynthWorker(QThread):
     done = pyqtSignal(object)
     failed = pyqtSignal(str)
 
-    def __init__(self, music, sr, text, font_size, region, gain_db):
+    def __init__(self, music, sr, source, region, gain_db):
         super().__init__()
         self.music, self.sr = music, sr
-        self.text, self.font_size = text, font_size
+        # source: ("text", 文字) 或 ("image", 路径, 填充模式, 是否反色)
+        self.source = source
         self.region = region  # (t0, t1, f_low_hz, f_high_hz)
         self.gain_db = gain_db
 
     def run(self):
         try:
             t0, t1, f_low, f_high = self.region
-            img = core.render_text_image(self.text, self.font_size)
-            self.progress.emit(5, "渲染文字完成，开始超声编码...")
+            dur = t1 - t0
+            # 按区域像素网格原生渲染，清晰度最高
+            w, h = core.region_geometry(self.sr, f_low, f_high, dur)
+            if self.source[0] == "text":
+                img = core.render_text_fit(self.source[1], w, h)
+            else:
+                _, path, mode, invert = self.source
+                img = core.load_stego_image(path, w, h, mode, invert)
+            self.progress.emit(5, "内容渲染完成，开始超声编码...")
             hidden = core.synthesize_ultrasound(
                 img, self.sr, f_low, f_high, dur,
                 progress_cb=lambda p, m: self.progress.emit(5 + int(p * 0.75), m))
