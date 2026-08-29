@@ -41,7 +41,7 @@ title = doc.add_heading("无敌章鱼哥出品：频谱画家", 0)
 title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 sub = doc.add_paragraph("Invincible Squidward Presents: Spectrum Painter")
 sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-ver = doc.add_paragraph("使用说明书 · v1.1.0")
+ver = doc.add_paragraph("使用说明书 · v1.2.2")
 ver.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 doc.add_paragraph()
@@ -77,13 +77,13 @@ para("软件界面分为左、右两部分：左侧是操作面板（按 ①②�
 step(1, "打开音频", "点击「① 打开音频」，支持 WAV / FLAC / OGG / MP3。"
      "建议使用无损音乐；非 192kHz 的文件会自动重采样并在界面上提示。")
 step(2, "设置绘制内容", "类型选「文字」「图片 / Logo」或「二维码 / QR Code」。"
-     "文字直接输入即可，字号会自动适配区域大小；图片支持 PNG / JPG / BMP / WebP，透明背景自动合成；"
-     "二维码模式自动二值化为亮底暗码，频谱截图可直接被手机扫码（默认「保持方形」，"
-     "选「拉伸填满」则跟随区域形状但可能无法扫码）。")
-para("图片模式选项：", bold=True)
-bullet("保持比例（推荐）：图片居中显示，多余部分留黑（黑色 = 无声，不影响听感）")
-bullet("拉伸填满：图片撑满整个框选区域，可能变形")
-bullet("反色：深色 Logo 勾选后变为亮色，频谱中更醒目")
+     "文字直接输入即可，字号自动适配区域高度；图片支持 PNG / JPG / BMP / WebP，"
+     "透明背景自动合成；二维码自动二值化为亮底暗码，频谱截图可直接被手机扫码。")
+para("重要：内容会拉伸填满你框选的区域（所见即所得）", bold=True)
+bullet("框选区域的形状直接决定最终效果 —— 框什么形状，内容就是什么形状")
+bullet("文字：框一个扁长区域（如 5~10 秒 × 20kHz 高）效果最佳")
+bullet("图片 / Logo：按图片本身宽高比框选，深色 Logo 记得勾选「反色」")
+bullet("二维码：框一个在屏幕上接近正方形的区域，扫码成功率最高")
 step(3, "框选绘制区域", "在右侧频谱图上按住鼠标左键拖出一个矩形框。"
      "建议框在 20kHz 以上（例如 25–55kHz），避免与音乐本体冲突。"
      "框越高、越长，文字/图片越精细。")
@@ -104,6 +104,9 @@ para("下图左侧为文字嵌入效果（「HELLO 你好」），右侧为图�
      "均位于 25–45kHz 频段：")
 doc.add_picture(r"e:\新建文件夹 (3)\verify_spec_v11.png", width=Cm(16))
 doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+para("下图为二维码嵌入后从频谱中重建的效果 —— 该图可被扫码软件直接识别：")
+doc.add_picture(r"e:\新建文件夹 (3)\verify_qr_square.png", width=Cm(9))
+doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 # ---------- 四、常见问题 ----------
 h("四、常见问题")
@@ -114,8 +117,8 @@ para("Q：Spek 里看不到图案？", bold=True)
 para("A：① 确认 Spek 的显示上限调到 96kHz（默认可能只显示到 20kHz+）；"
      "② 确认框选区域在 20kHz 以上且合成成功；③ 尝试把隐藏增益调高到 -30dB。")
 para("Q：图案模糊或变形？", bold=True)
-para("A：把框选区域拉长拉高（时间越长、频率范围越宽，可用像素越多）；"
-     "图片模式优先选「保持比例」。")
+para("A：内容会拉伸填满框选区域，图案形状由你框的区域形状决定。"
+     "把框选区域拉长拉高（时间越长、频率范围越宽，可用像素越多），并按内容宽高比框选。")
 para("Q：支持多长的音乐？", bold=True)
 para("A：理论上不限，几分钟的歌曲均可正常处理；文件越大合成时间越长，请耐心等待进度条。")
 para("Q：导出的文件很大正常吗？", bold=True)
