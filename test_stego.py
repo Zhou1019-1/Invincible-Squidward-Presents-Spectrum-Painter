@@ -35,7 +35,7 @@ assert contrast > 12  # 相位连续合成后能量更集中，阈值相应调�
 
 # --- ③ 图片嵌入（用章鱼哥 icon 当 Logo）---
 img_logo = core.load_stego_image(
-    r"e:\新建文件夹 (3)\icon\icon.png", w, h, mode="fit")
+    r"e:\新建文件夹 (3)\icon\icon.png", w, h)
 assert img_logo.shape == (h, w)
 print("图片加载 OK:", img_logo.shape, "非零像素占比: %.0f%%" %
       (100 * np.mean(img_logo > 10)))

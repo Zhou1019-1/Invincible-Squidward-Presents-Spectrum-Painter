@@ -194,10 +194,10 @@ class SynthWorker(QThread):
             if self.source[0] == "text":
                 img = core.render_text_fit(self.source[1], w, h)
             elif self.source[0] == "qrcode":
-                img = core.load_qr_image(self.source[1], w, h, self.source[2])
+                img = core.load_qr_image(self.source[1], w, h)
             else:
-                _, path, mode, invert = self.source
-                img = core.load_stego_image(path, w, h, mode, invert)
+                _, path, invert = self.source
+                img = core.load_stego_image(path, w, h, invert)
             self.progress.emit(5, "内容渲染完成，开始超声编码...")
             hidden = core.synthesize_ultrasound(
                 img, self.sr, f_low, f_high, dur,
@@ -278,17 +278,14 @@ class MainWindow(QMainWindow):
         self.lbl_imgname.setWordWrap(True)
         fi.addRow(self.btn_img)
         fi.addRow(self.lbl_imgname)
-        # 普通图片的额外选项（二维码模式下隐藏）
+        # 普通图片的额外选项（仅图片模式显示）
         self.img_extra = QWidget()
         fe = QFormLayout(self.img_extra)
         fe.setContentsMargins(0, 0, 0, 0)
-        self.cmb_fit = QComboBox()
-        self.cmb_fit.addItems(["保持比例（推荐）", "拉伸填满"])
         self.chk_invert = QCheckBox("反色（深色 Logo 勾选）")
-        fe.addRow("填充:", self.cmb_fit)
         fe.addRow(self.chk_invert)
         fi.addRow(self.img_extra)
-        self.lbl_qr_hint = QLabel("提示：默认「保持方形」可直接扫码；\n「拉伸填满」跟随区域形状但可能扫不出")
+        self.lbl_qr_hint = QLabel("提示：二维码会拉伸填满所框区域，\n框一个在屏幕上接近正方形的区域可正常扫码")
         self.lbl_qr_hint.setWordWrap(True)
         self.lbl_qr_hint.setStyleSheet("color:#ffaa44;")
         self.lbl_qr_hint.setVisible(False)
@@ -403,18 +400,8 @@ class MainWindow(QMainWindow):
     def on_type_changed(self, idx):
         self.text_opts.setVisible(idx == 0)
         self.img_opts.setVisible(idx > 0)
-        self.img_extra.setVisible(idx > 0)
-        self.chk_invert.setVisible(idx == 1)      # 二维码自动处理反色
+        self.img_extra.setVisible(idx == 1)  # 反色仅图片模式
         self.lbl_qr_hint.setVisible(idx == 2)
-        # 切换填充选项文案
-        self.cmb_fit.blockSignals(True)
-        self.cmb_fit.clear()
-        if idx == 2:
-            self.cmb_fit.addItems(["保持方形（推荐，可扫码）", "拉伸填满"])
-        else:
-            self.cmb_fit.addItems(["保持比例（推荐）", "拉伸填满"])
-        self.cmb_fit.setCurrentIndex(0)
-        self.cmb_fit.blockSignals(False)
         self.update_preview()
 
     def choose_image(self):
@@ -474,14 +461,12 @@ class MainWindow(QMainWindow):
             if not self.img_path:
                 QMessageBox.warning(self, "提示", "请先选择图片")
                 return
-            mode = "stretch" if self.cmb_fit.currentIndex() == 1 else "fit"
-            source = ("image", self.img_path, mode, self.chk_invert.isChecked())
+            source = ("image", self.img_path, self.chk_invert.isChecked())
         else:
             if not self.img_path:
                 QMessageBox.warning(self, "提示", "请先选择二维码图片")
                 return
-            qr_mode = "stretch" if self.cmb_fit.currentIndex() == 1 else "square"
-            source = ("qrcode", self.img_path, qr_mode)
+            source = ("qrcode", self.img_path)
         self.btn_synth.setEnabled(False)
         self.worker = SynthWorker(
             self.music, self.sr, source, self.region,

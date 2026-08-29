@@ -87,10 +87,9 @@ def render_text_fit(text, target_w, target_h, color="white"):
     return np.asarray(img, dtype=np.uint8)
 
 
-def load_stego_image(path, target_w, target_h, mode="fit", invert=False):
+def load_stego_image(path, target_w, target_h, invert=False):
     """
-    加载图片/Logo 并适配到目标像素网格。
-    mode: "fit" 保持比例居中（黑边=无声）/ "stretch" 拉伸填满
+    加载图片/Logo，拉伸填满目标像素网格（所见即所得：框什么形状就得什么形状）。
     invert: 反色（适合深色 Logo）
     取红色通道；透明 PNG 合成到黑底。
     """
@@ -98,13 +97,7 @@ def load_stego_image(path, target_w, target_h, mode="fit", invert=False):
     bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
     img = Image.alpha_composite(bg, img).convert("RGB")
     r = img.split()[0]  # 红色通道
-    if mode == "stretch":
-        r = r.resize((target_w, target_h), Image.BILINEAR)
-    else:
-        r.thumbnail((target_w, target_h), Image.LANCZOS)
-        canvas = Image.new("L", (target_w, target_h), 0)
-        canvas.paste(r, ((target_w - r.width) // 2, (target_h - r.height) // 2))
-        r = canvas
+    r = r.resize((target_w, target_h), Image.BILINEAR)
     arr = np.asarray(r, dtype=np.uint8)
     if invert:
         arr = 255 - arr
@@ -122,33 +115,21 @@ def _otsu_threshold(arr):
     return int(np.argmax(sigma2))
 
 
-def load_qr_image(path, target_w, target_h, mode="square"):
+def load_qr_image(path, target_w, target_h):
     """
-    二维码专用管线：白底合成 -> 灰度 -> Otsu 二值化 -> 亮底暗码（截图可直接扫码）
-    -> NEAREST 缩放保持硬边缘。
-    mode: "square" 保持码元为正方形（可扫码，推荐）/ "stretch" 拉伸填满区域
+    二维码专用管线：白底合成 -> 灰度 -> Otsu 二值化 -> 亮底暗码
+    -> NEAREST 拉伸填满目标网格（保持硬边缘，平滑插值会糊掉码点）。
     """
     img = Image.open(path).convert("RGBA")
     bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
     gray = Image.alpha_composite(bg, img).convert("L")
     arr = np.asarray(gray)
     t = _otsu_threshold(arr)
-    # 亮底暗码（不反色）：频谱中显示为亮块+暗码点，截图可直接被手机扫描
+    # 亮底暗码（不反色）：频谱中显示为亮块+暗码点
     # 超声波频段不可闻，亮底不会产生可闻噪声
     binary = ((arr > t).astype(np.uint8)) * 255
-    if mode == "stretch":
-        # 拉伸填满：网格线性映射到 时间×频率 显示，跟随区域形状
-        pil = Image.fromarray(binary).resize((target_w, target_h), Image.NEAREST)
-        return np.asarray(pil, dtype=np.uint8)
-    # square：等比缩放（允许放大），保持码元正方形，居中留黑边
-    bh, bw_ = binary.shape
-    scale = min(target_h / bh, target_w / bw_)
-    new_w = max(1, int(bw_ * scale))
-    new_h = max(1, int(bh * scale))
-    pil = Image.fromarray(binary).resize((new_w, new_h), Image.NEAREST)
-    canvas = Image.new("L", (target_w, target_h), 0)
-    canvas.paste(pil, ((target_w - new_w) // 2, (target_h - new_h) // 2))
-    return np.asarray(canvas, dtype=np.uint8)
+    pil = Image.fromarray(binary).resize((target_w, target_h), Image.NEAREST)
+    return np.asarray(pil, dtype=np.uint8)
 
 
 def render_text_image(text, font_size=64, color="white"):
