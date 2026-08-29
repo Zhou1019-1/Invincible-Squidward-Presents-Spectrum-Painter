@@ -193,6 +193,8 @@ class SynthWorker(QThread):
             w, h = core.region_geometry(self.sr, f_low, f_high, dur)
             if self.source[0] == "text":
                 img = core.render_text_fit(self.source[1], w, h)
+            elif self.source[0] == "qrcode":
+                img = core.load_qr_image(self.source[1], w, h)
             else:
                 _, path, mode, invert = self.source
                 img = core.load_stego_image(path, w, h, mode, invert)
@@ -249,7 +251,7 @@ class MainWindow(QMainWindow):
         grp_text = QGroupBox("② 绘制内容")
         form = QFormLayout(grp_text)
         self.cmb_type = QComboBox()
-        self.cmb_type.addItems(["文字", "图片 / Logo"])
+        self.cmb_type.addItems(["文字", "图片 / Logo", "二维码 / QR Code"])
         self.cmb_type.currentIndexChanged.connect(self.on_type_changed)
         form.addRow("类型:", self.cmb_type)
 
@@ -274,13 +276,23 @@ class MainWindow(QMainWindow):
         self.btn_img.clicked.connect(self.choose_image)
         self.lbl_imgname = QLabel("未选择")
         self.lbl_imgname.setWordWrap(True)
+        fi.addRow(self.btn_img)
+        fi.addRow(self.lbl_imgname)
+        # 普通图片的额外选项（二维码模式下隐藏）
+        self.img_extra = QWidget()
+        fe = QFormLayout(self.img_extra)
+        fe.setContentsMargins(0, 0, 0, 0)
         self.cmb_fit = QComboBox()
         self.cmb_fit.addItems(["保持比例（推荐）", "拉伸填满"])
         self.chk_invert = QCheckBox("反色（深色 Logo 勾选）")
-        fi.addRow(self.btn_img)
-        fi.addRow(self.lbl_imgname)
-        fi.addRow("填充:", self.cmb_fit)
-        fi.addRow(self.chk_invert)
+        fe.addRow("填充:", self.cmb_fit)
+        fe.addRow(self.chk_invert)
+        fi.addRow(self.img_extra)
+        self.lbl_qr_hint = QLabel("提示：建议框选接近正方形的区域；\n二值化 + 反色已自动处理")
+        self.lbl_qr_hint.setWordWrap(True)
+        self.lbl_qr_hint.setStyleSheet("color:#ffaa44;")
+        self.lbl_qr_hint.setVisible(False)
+        fi.addRow(self.lbl_qr_hint)
         self.img_opts.setVisible(False)
         form.addRow(self.img_opts)
 
@@ -389,9 +401,10 @@ class MainWindow(QMainWindow):
             f"频率: {f0:.1f} – {f1:.1f} kHz")
 
     def on_type_changed(self, idx):
-        is_text = idx == 0
-        self.text_opts.setVisible(is_text)
-        self.img_opts.setVisible(not is_text)
+        self.text_opts.setVisible(idx == 0)
+        self.img_opts.setVisible(idx > 0)
+        self.img_extra.setVisible(idx == 1)       # 二维码模式隐藏填充/反色
+        self.lbl_qr_hint.setVisible(idx == 2)
         self.update_preview()
 
     def choose_image(self):
@@ -420,7 +433,10 @@ class MainWindow(QMainWindow):
                 self.lbl_preview.clear()
                 return
             try:
-                img = core.load_stego_image(self.img_path, 400, 80)
+                if self.cmb_type.currentIndex() == 2:
+                    img = core.load_qr_image(self.img_path, 400, 80)
+                else:
+                    img = core.load_stego_image(self.img_path, 400, 80)
             except Exception:
                 return
             rgb = np.repeat(img[..., None], 3, axis=2)
@@ -438,17 +454,23 @@ class MainWindow(QMainWindow):
         if self.region is None:
             QMessageBox.warning(self, "提示", "请先在频谱图上框选绘制区域")
             return
-        if self.cmb_type.currentIndex() == 0:
+        idx = self.cmb_type.currentIndex()
+        if idx == 0:
             if not self.edt_text.text().strip():
                 QMessageBox.warning(self, "提示", "请输入要绘制的文字")
                 return
             source = ("text", self.edt_text.text())
-        else:
+        elif idx == 1:
             if not self.img_path:
                 QMessageBox.warning(self, "提示", "请先选择图片")
                 return
             mode = "stretch" if self.cmb_fit.currentIndex() == 1 else "fit"
             source = ("image", self.img_path, mode, self.chk_invert.isChecked())
+        else:
+            if not self.img_path:
+                QMessageBox.warning(self, "提示", "请先选择二维码图片")
+                return
+            source = ("qrcode", self.img_path)
         self.btn_synth.setEnabled(False)
         self.worker = SynthWorker(
             self.music, self.sr, source, self.region,
