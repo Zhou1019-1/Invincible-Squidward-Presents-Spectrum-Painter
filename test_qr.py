@@ -45,18 +45,20 @@ spec_img = cv2.resize(spec_img[::-1], None, fx=2, fy=2,
 with open(r"e:\新建文件夹 (3)\verify_qr_spec.png", "wb") as f:
     f.write(cv2.imencode(".png", spec_img)[1].tobytes())
 
-# OpenCV 扫码验证（亮底暗码，频谱截图直接可扫；先 Otsu 二值化提高识别率）
+# OpenCV 扫码验证（亮底暗码；中值滤波去散斑 + 裁剪亮块 + 留白边 + 放大）
 det = cv2.QRCodeDetector()
-data, pts, _ = det.detectAndDecode(spec_img)
+_, bw = cv2.threshold(spec_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+clean = cv2.medianBlur(bw, 5)
+ys, xs = np.where(clean > 127)
+crop = clean[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+padded = cv2.copyMakeBorder(crop, 60, 60, 60, 60, cv2.BORDER_CONSTANT, value=255)
+big = cv2.resize(padded, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+data, pts, _ = det.detectAndDecode(big)
 if not data:
-    _, bw = cv2.threshold(spec_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    data, pts, _ = det.detectAndDecode(bw)
-    if data:
-        print("（二值化后扫出）")
-if not data:  # 容错：某些扫码器喜欢暗底亮码，反转再试
-    data, pts, _ = det.detectAndDecode(255 - spec_img)
-    if data:
-        print("（反色后扫出）")
+    ok, infos, _, _ = det.detectAndDecodeMulti(big)
+    if ok and infos and infos[0]:
+        data = infos[0]
+        print("（detectAndDecodeMulti 扫出）")
 print("扫码结果:", repr(data))
 if data == PAYLOAD:
     print("✔✔✔ 频谱中的二维码可以直接扫出！")

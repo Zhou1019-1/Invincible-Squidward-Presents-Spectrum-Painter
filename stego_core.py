@@ -58,8 +58,8 @@ def region_geometry(sr, f_low, f_high, duration):
 
 def render_text_fit(text, target_w, target_h, color="white"):
     """
-    按目标像素尺寸渲染文字（原生分辨率，最清晰）。
-    字号自动适配高度；宽度不足时自动加大字间距填满区域，字形不压扁。
+    按目标像素尺寸渲染文字：字号自动适配高度，再整体拉伸填满区域
+    （网格线性映射到 时间×频率 显示，所见即所得）。
     """
     pad = 2
     # 二分查找：高度方向能放下的最大字号
@@ -71,7 +71,7 @@ def render_text_fit(text, target_w, target_h, color="white"):
         d = ImageDraw.Draw(Image.new("L", (8, 8), 0))
         bbox = d.textbbox((0, 0), text, font=font)
         w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        if h <= target_h - pad * 2 and w <= target_w - pad * 2:
+        if h <= target_h - pad * 2:
             best = mid
             lo = mid + 1
         else:
@@ -80,22 +80,10 @@ def render_text_fit(text, target_w, target_h, color="white"):
     d = ImageDraw.Draw(Image.new("L", (8, 8), 0))
     bbox = d.textbbox((0, 0), text, font=font)
     w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-
-    img = Image.new("L", (target_w, target_h), 0)
-    d = ImageDraw.Draw(img)
-    if w >= target_w - pad * 2:
-        # 宽度方向也占满了，直接整体绘制
-        d.text(((target_w - w) // 2 - bbox[0], (target_h - h) // 2 - bbox[1]),
-               text, font=font, fill=255)
-    else:
-        # 宽度有余量：逐字绘制并均匀分配字间距，填满整个区域
-        n = len(text)
-        spacing = (target_w - pad * 2 - w) / max(n, 1)
-        x = pad + spacing / 2 - bbox[0]
-        y = (target_h - h) // 2 - bbox[1]
-        for ch in text:
-            d.text((x, y), ch, font=font, fill=255)
-            x += d.textlength(ch, font=font) + spacing
+    tmp = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(tmp).text((-bbox[0], -bbox[1]), text, font=font, fill=255)
+    # 拉伸填满目标网格（LANCZOS 平滑）
+    img = tmp.resize((target_w, target_h), Image.LANCZOS)
     return np.asarray(img, dtype=np.uint8)
 
 
@@ -134,10 +122,11 @@ def _otsu_threshold(arr):
     return int(np.argmax(sigma2))
 
 
-def load_qr_image(path, target_w, target_h):
+def load_qr_image(path, target_w, target_h, mode="square"):
     """
-    二维码专用管线：白底合成 -> 灰度 -> Otsu 二值化 -> 反色（黑码点变亮、白底静音）
-    -> NEAREST 缩放保持硬边缘（平滑插值会糊掉码点导致无法扫描）-> 保持比例居中。
+    二维码专用管线：白底合成 -> 灰度 -> Otsu 二值化 -> 亮底暗码（截图可直接扫码）
+    -> NEAREST 缩放保持硬边缘。
+    mode: "square" 保持码元为正方形（可扫码，推荐）/ "stretch" 拉伸填满区域
     """
     img = Image.open(path).convert("RGBA")
     bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
@@ -147,7 +136,11 @@ def load_qr_image(path, target_w, target_h):
     # 亮底暗码（不反色）：频谱中显示为亮块+暗码点，截图可直接被手机扫描
     # 超声波频段不可闻，亮底不会产生可闻噪声
     binary = ((arr > t).astype(np.uint8)) * 255
-    # 放大填满目标网格（thumbnail 只缩不放，会导致码元只占几行、被频谱泄漏吃掉）
+    if mode == "stretch":
+        # 拉伸填满：网格线性映射到 时间×频率 显示，跟随区域形状
+        pil = Image.fromarray(binary).resize((target_w, target_h), Image.NEAREST)
+        return np.asarray(pil, dtype=np.uint8)
+    # square：等比缩放（允许放大），保持码元正方形，居中留黑边
     bh, bw_ = binary.shape
     scale = min(target_h / bh, target_w / bw_)
     new_w = max(1, int(bw_ * scale))
@@ -178,7 +171,8 @@ def render_text_image(text, font_size=64, color="white"):
     return np.asarray(img, dtype=np.uint8)
 
 
-def synthesize_ultrasound(img, sr, f_low, f_high, duration, progress_cb=None):
+def synthesize_ultrasound(img, sr, f_low, f_high, duration, progress_cb=None,
+                          freq_jitter=0.0):
     """
     把图像（HxW uint8，R 通道）编码为超声波时域信号。
     顶部=高频，底部=低频。返回 float32 单声道数组，峰值归一化到 0.95。
@@ -206,9 +200,14 @@ def synthesize_ultrasound(img, sr, f_low, f_high, duration, progress_cb=None):
     # 相位连续（按全局时间推进）：每列音调与前后列无缝衔接，
     # 避免帧间相位跳变产生的条纹噪声，图案边缘锐利可扫码
     cols = np.arange(width)
-    # 轻微频率抖动：打散相邻频点间的拍频干涉条纹（否则亮区出现竖纹）
-    jitter = np.random.default_rng(42).uniform(-0.45, 0.45, n_rows)
-    freq_units = bins.astype(np.float64) + jitter
+    # 可选频率抖动（打散拍频条纹；注意必须搭配小数频点真实合成才有意义，
+    # 整数 bin 的 IFFT 无法承载亚 bin 偏移，抖动会退化成相位噪声，故默认关闭）
+    if freq_jitter > 0:
+        jitter = np.random.default_rng(42).uniform(
+            -freq_jitter, freq_jitter, n_rows)
+        freq_units = bins.astype(np.float64) + jitter
+    else:
+        freq_units = bins.astype(np.float64)
     phases = 2 * np.pi * (
         (freq_units[None, :] * (cols * HOP)[:, None]) % N_FFT) / N_FFT
 
